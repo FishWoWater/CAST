@@ -124,7 +124,7 @@ Examples:
     parser.add_argument(
         "--mesh-provider",
         type=str,
-        choices=["tripo3d", "trellis"],
+        choices=["tripo3d", "trellis", "hunyuan3d"],
         default="trellis",
         help="Mesh provider (default: trellis)"
     )

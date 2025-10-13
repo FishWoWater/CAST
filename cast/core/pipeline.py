@@ -16,6 +16,7 @@ from ..modules.detection_filtering import DetectionFilteringModule
 from ..modules.image_generation import ImageGenerationModule
 from ..modules.depth_estimation import DepthEstimationModule
 from ..modules.mesh_generation import MeshGenerationModule
+from ..modules.hunyuan_mesh_generation import HunyuanMeshGenerationModule
 from ..modules.pose_estimation import PoseEstimationModule
 from ..modules.scene_graph_optimization import SceneGraphOptimizationModule
 
@@ -37,7 +38,7 @@ class CASTPipeline:
     """
     
     def __init__(self, output_dir: Optional[Path] = None, 
-                 mesh_provider: Literal["tripo3d", "trellis"] = "trellis",
+                 mesh_provider: Literal["tripo3d", "trellis", "hunyuan3d"] = "trellis",
                  mesh_base_url: Optional[str] = None,
                  generation_provider: Literal["replicate", "qwen"] = "qwen", 
                  pose_estimation_backend: Literal["icp", "pytorch"] = "icp",
@@ -49,7 +50,7 @@ class CASTPipeline:
         
         Args:
             output_dir: Directory to save all outputs
-            mesh_provider: 3D mesh generation provider ("tripo3d" or "trellis")
+            mesh_provider: 3D mesh generation provider ("tripo3d", "trellis", or "hunyuan3d")
             generation_provider: Image generation provider ("replicate" or "qwen")
             pose_estimation_backend: Backend for pose estimation ("icp" or "pytorch")
             enable_render_and_compare: Whether to enable render-and-compare for pose estimation
@@ -57,6 +58,7 @@ class CASTPipeline:
             debug: Whether to enable debug mode
         """
         self.output_dir = output_dir or config.paths.output_dir
+        self.mesh_provider = mesh_provider
         
         # Initialize all modules
         print("Initializing CAST pipeline modules...")
@@ -64,7 +66,13 @@ class CASTPipeline:
         self.filtering_module = DetectionFilteringModule()
         self.generation_module = ImageGenerationModule(provider=generation_provider)
         self.depth_module = DepthEstimationModule()
-        self.mesh_module = MeshGenerationModule(provider=mesh_provider, base_url=mesh_base_url)
+        
+        # Initialize mesh generation module based on provider
+        if mesh_provider == "hunyuan3d":
+            self.mesh_module = HunyuanMeshGenerationModule()
+        else:
+            self.mesh_module = MeshGenerationModule(provider=mesh_provider, base_url=mesh_base_url)
+        
         self.pose_module = PoseEstimationModule(backend=pose_estimation_backend,  enable_render_and_compare=enable_render_and_compare, debug=debug)
         self.scene_graph_module = SceneGraphOptimizationModule() if enable_scene_graph_opt else None
         self.debug = debug
@@ -312,11 +320,19 @@ class CASTPipeline:
             mesh_data = self._load_stage_result('mesh', run_output_dir)
             meshes, valid_objects = mesh_data['meshes'], mesh_data['objects']
         else:
-            meshes = self.mesh_module.run(
-                detected_objects,
-                output_dir=run_output_dir if save_intermediates else None,
-                **mesh_kwargs
-            )
+            # For Hunyuan3D, pass depth_estimation for point cloud conditioning
+            if self.mesh_provider == "hunyuan3d":
+                meshes = self.mesh_module.run(
+                    detected_objects,
+                    depth_estimation,
+                    output_dir=run_output_dir if save_intermediates else None
+                )
+            else:
+                meshes = self.mesh_module.run(
+                    detected_objects,
+                    output_dir=run_output_dir if save_intermediates else None,
+                    **mesh_kwargs
+                )
             
             # Filter out failed mesh generations
             valid_pairs = [(mesh, obj) for mesh, obj in zip(meshes, detected_objects) if mesh is not None]
@@ -639,7 +655,7 @@ class CASTPipeline:
         return results
 
 def create_pipeline(output_dir: Optional[str] = None, 
-                   mesh_provider: Literal["tripo3d", "trellis"] = "trellis",
+                   mesh_provider: Literal["tripo3d", "trellis", "hunyuan3d"] = "trellis",
                    mesh_base_url: Optional[str] = None,
                    generation_provider: Literal["replicate", "qwen"] = "replicate", 
                    pose_estimation_backend: Literal["icp", "pytorch"] = "icp",
@@ -649,7 +665,7 @@ def create_pipeline(output_dir: Optional[str] = None,
     
     Args:
         output_dir: Output directory path
-        mesh_provider: 3D mesh generation provider ("tripo3d" or "trellis")
+        mesh_provider: 3D mesh generation provider ("tripo3d", "trellis", or "hunyuan3d")
         generation_provider: Image generation provider ("replicate" or "qwen")
         
     Returns:
